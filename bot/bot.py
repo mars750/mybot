@@ -1,6 +1,9 @@
 import logging
 import random
 import re
+import threading
+import os
+from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters, CallbackContext
 from telegram.error import BadRequest
@@ -16,6 +19,17 @@ JOIN_CHANNEL_LINK = "https://t.me/Play_with_TG"
 DAILY_BONUS = 5
 MINIMUM_WITHDRAWAL = 50
 CHANNEL_USERNAME = re.search(r"t\.me\/(.+)", JOIN_CHANNEL_LINK).group(1)
+
+# --- Flask Server for Render ---
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot is alive!"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
 
 # --- Join Check Function ---
 def check_joined_channel(user_id, context: CallbackContext) -> bool:
@@ -39,7 +53,6 @@ def start(update: Update, context: CallbackContext) -> None:
             'joined_channel': False
         }
 
-    # Check Channel Join
     if not check_joined_channel(user_id, context):
         join_button = [[InlineKeyboardButton("✅ I've Joined / Refresh", callback_data='refresh')]]
         reply_markup = InlineKeyboardMarkup(join_button)
@@ -47,7 +60,6 @@ def start(update: Update, context: CallbackContext) -> None:
                                   reply_markup=reply_markup)
         return
 
-    # Main Menu Buttons
     main_menu(update.message, user_id)
 
 # --- Show Main Menu ---
@@ -57,7 +69,7 @@ def main_menu(message_or_query, user_id):
          InlineKeyboardButton("Referral Link", callback_data='referral_link')],
         [InlineKeyboardButton("How to Earn", callback_data='earnings'),
          InlineKeyboardButton("Withdraw", callback_data='withdraw')],
-        [InlineKeyboardButton("🎡 Spin Wheel", web_app=WebAppInfo(url="https://spin-wheel-3igb.vercel.app/"))]  # <-- New Button Here
+        [InlineKeyboardButton("🎡 Spin Wheel", web_app=WebAppInfo(url="https://spin-wheel-3igb.vercel.app/"))]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     message_or_query.reply_text("💰 Welcome to the Referral Earning Bot!", reply_markup=reply_markup)
@@ -70,7 +82,6 @@ def button_callback(update: Update, context: CallbackContext):
     if user_id not in users_data:
         users_data[user_id] = {'balance': 0, 'referrals': 0, 'referred_by': None, 'joined_channel': False}
 
-    # Refresh Button to Re-check Join
     if query.data == 'refresh':
         if check_joined_channel(user_id, context):
             query.message.delete()
@@ -79,12 +90,10 @@ def button_callback(update: Update, context: CallbackContext):
             query.answer("❗ You haven't joined yet.", show_alert=True)
         return
 
-    # If not joined
     if not users_data[user_id]['joined_channel']:
         query.answer("❗ Please join the channel first.")
         return
 
-    # Handle different buttons
     if query.data == 'balance':
         query.edit_message_text(f"💰 Your current balance is ₹{users_data[user_id]['balance']}",
                                 reply_markup=back_menu())
@@ -147,7 +156,11 @@ def handle_referral(update: Update, context: CallbackContext):
 
 # --- Main Function ---
 def main():
-    updater = Updater("6104357336:AAFeiVvnB7Cg8dJH6tFTEGqyWVDT2UlXHsw")  # <-- Tumhara Bot Token
+    # Flask Server को एक अलग थ्रेड में चलाओ
+    threading.Thread(target=run_flask).start()
+
+    # Telegram Bot चलाओ
+    updater = Updater("6104357336:AAFeiVvnB7Cg8dJH6tFTEGqyWVDT2UlXHsw")  # आपका बॉट टोकन
     dp = updater.dispatcher
 
     dp.add_handler(CommandHandler("start", start))
