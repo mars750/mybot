@@ -9,8 +9,7 @@ from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageH
 from telegram.error import BadRequest
 
 # --- Setup Logging ---
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                    level=logging.INFO)
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- Global Data ---
@@ -56,8 +55,9 @@ def start(update: Update, context: CallbackContext) -> None:
     if not check_joined_channel(user_id, context):
         join_button = [[InlineKeyboardButton("✅ I've Joined / Refresh", callback_data='refresh')]]
         reply_markup = InlineKeyboardMarkup(join_button)
-        update.message.reply_text(f"👉 To use this bot, please join our channel first:\n\n📢 {JOIN_CHANNEL_LINK}\n\nAfter joining, click the button below.",
-                                  reply_markup=reply_markup)
+        update.message.reply_text(
+            f"👉 To use this bot, please join our channel first:\n\n📢 {JOIN_CHANNEL_LINK}\n\nAfter joining, click the button below.",
+            reply_markup=reply_markup)
         return
 
     main_menu(update.message, user_id)
@@ -160,7 +160,9 @@ def main():
     threading.Thread(target=run_flask).start()
 
     # Telegram Bot चलाओ
-    updater = Updater("6104357336:AAFeiVvnB7Cg8dJH6tFTEGqyWVDT2UlXHsw")  # आपका बॉट टोकन
+    TOKEN = os.getenv("BOT_TOKEN")  # बेहतर तरीका: टोकन env से लो
+    updater = Updater(TOKEN)  
+    updater.bot.delete_webhook()  # --- यहीं पर Webhook हटा दिया ---
     dp = updater.dispatcher
 
     dp.add_handler(CommandHandler("start", start))
