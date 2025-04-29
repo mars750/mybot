@@ -3,34 +3,39 @@ import random
 import re
 import threading
 import os
-from flask import Flask
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
-from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters, CallbackContext
+from flask import Flask, request
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo, Bot
+from telegram.ext import Dispatcher, CommandHandler, CallbackQueryHandler, MessageHandler, Filters, CallbackContext
 from telegram.error import BadRequest
 
-# --- Setup Logging ---
+# --- Logging ---
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- Global Data ---
+# --- Global ---
 users_data = {}
+TOKEN = os.getenv("BOT_TOKEN")
+bot = Bot(token=TOKEN)
+dispatcher = Dispatcher(bot=bot, update_queue=None, use_context=True)
+
 JOIN_CHANNEL_LINK = "https://t.me/Play_with_TG"
 DAILY_BONUS = 5
 MINIMUM_WITHDRAWAL = 50
 CHANNEL_USERNAME = re.search(r"t\.me\/(.+)", JOIN_CHANNEL_LINK).group(1)
 
-# --- Flask Server for Render ---
+# --- Flask App ---
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot is alive!"
+    return "Bot is running with webhook!"
 
-def run_flask():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+@app.route(f"/{TOKEN}", methods=["POST"])
+def webhook():
+    update = Update.de_json(request.get_json(force=True), bot)
+    dispatcher.process_update(update)
+    return 'ok'
 
-# --- Join Check Function ---
 def check_joined_channel(user_id, context: CallbackContext) -> bool:
     try:
         user_member = context.bot.get_chat_member(f"@{CHANNEL_USERNAME}", user_id)
@@ -41,28 +46,21 @@ def check_joined_channel(user_id, context: CallbackContext) -> bool:
         logger.error(f"Channel check error: {e}")
     return False
 
-# --- Start Command ---
-def start(update: Update, context: CallbackContext) -> None:
+def start(update: Update, context: CallbackContext):
     user_id = update.message.from_user.id
     if user_id not in users_data:
-        users_data[user_id] = {
-            'balance': 0,
-            'referrals': 0,
-            'referred_by': None,
-            'joined_channel': False
-        }
+        users_data[user_id] = {'balance': 0, 'referrals': 0, 'referred_by': None, 'joined_channel': False}
 
     if not check_joined_channel(user_id, context):
         join_button = [[InlineKeyboardButton("✅ I've Joined / Refresh", callback_data='refresh')]]
         reply_markup = InlineKeyboardMarkup(join_button)
         update.message.reply_text(
-            f"👉 To use this bot, please join our channel first:\n\n📢 {JOIN_CHANNEL_LINK}\n\nAfter joining, click the button below.",
+            f"👉 To use this bot, join our channel:\n\n📢 {JOIN_CHANNEL_LINK}\n\nThen click the button below.",
             reply_markup=reply_markup)
         return
 
     main_menu(update.message, user_id)
 
-# --- Show Main Menu ---
 def main_menu(message_or_query, user_id):
     keyboard = [
         [InlineKeyboardButton("Check Balance", callback_data='balance'),
@@ -74,7 +72,6 @@ def main_menu(message_or_query, user_id):
     reply_markup = InlineKeyboardMarkup(keyboard)
     message_or_query.reply_text("💰 Welcome to the Referral Earning Bot!", reply_markup=reply_markup)
 
-# --- Callback Handler ---
 def button_callback(update: Update, context: CallbackContext):
     query = update.callback_query
     user_id = query.from_user.id
@@ -95,46 +92,37 @@ def button_callback(update: Update, context: CallbackContext):
         return
 
     if query.data == 'balance':
-        query.edit_message_text(f"💰 Your current balance is ₹{users_data[user_id]['balance']}",
-                                reply_markup=back_menu())
+        query.edit_message_text(f"💰 Your current balance is ₹{users_data[user_id]['balance']}", reply_markup=back_menu())
     elif query.data == 'referral_link':
         link = f"https://t.me/{context.bot.username}?start={user_id}"
-        query.edit_message_text(f"📢 Your referral link:\n{link}",
-                                reply_markup=back_menu())
+        query.edit_message_text(f"📢 Your referral link:\n{link}", reply_markup=back_menu())
     elif query.data == 'earnings':
-        query.edit_message_text("💸 You earn ₹5 for every person who joins using your referral link.",
-                                reply_markup=back_menu())
+        query.edit_message_text("💸 You earn ₹5 for every person who joins using your referral link.", reply_markup=back_menu())
     elif query.data == 'withdraw':
         balance = users_data[user_id]['balance']
         if balance >= MINIMUM_WITHDRAWAL:
             users_data[user_id]['balance'] -= MINIMUM_WITHDRAWAL
-            query.edit_message_text(f"✅ Withdrawal of ₹{MINIMUM_WITHDRAWAL} successful!\nNew Balance: ₹{users_data[user_id]['balance']}",
-                                    reply_markup=back_menu())
+            query.edit_message_text(f"✅ Withdrawal of ₹{MINIMUM_WITHDRAWAL} successful!\nNew Balance: ₹{users_data[user_id]['balance']}", reply_markup=back_menu())
         else:
-            query.edit_message_text(f"❌ You need at least ₹{MINIMUM_WITHDRAWAL} to withdraw.",
-                                    reply_markup=back_menu())
+            query.edit_message_text(f"❌ You need at least ₹{MINIMUM_WITHDRAWAL} to withdraw.", reply_markup=back_menu())
     elif query.data == 'back':
         query.message.delete()
         main_menu(query.message, user_id)
 
-# --- Back Button ---
 def back_menu():
     return InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Menu", callback_data='back')]])
 
-# --- Add Points Command ---
 def add_points(update: Update, context: CallbackContext):
     user_id = update.message.from_user.id
     if user_id not in users_data:
         users_data[user_id] = {'balance': 0, 'referrals': 0, 'referred_by': None, 'joined_channel': False}
-
     try:
         points = int(context.args[0])
         users_data[user_id]['balance'] += points
-        update.message.reply_text(f"🎉 Congratulations! {points} points added to your wallet.\n💰 New Balance: ₹{users_data[user_id]['balance']}")
+        update.message.reply_text(f"🎉 {points} points added!\n💰 Balance: ₹{users_data[user_id]['balance']}")
     except (IndexError, ValueError):
-        update.message.reply_text("❗ Please provide valid points after /addpoints command.")
+        update.message.reply_text("❗ Use: /addpoints <amount>")
 
-# --- Handle Referral ---
 def handle_referral(update: Update, context: CallbackContext):
     user_id = update.message.from_user.id
     text = update.message.text
@@ -154,24 +142,15 @@ def handle_referral(update: Update, context: CallbackContext):
 
     start(update, context)
 
-# --- Main Function ---
-def main():
-    # Flask Server को एक अलग थ्रेड में चलाओ
-    threading.Thread(target=run_flask).start()
+# --- Register Handlers ---
+dispatcher.add_handler(CommandHandler("start", start))
+dispatcher.add_handler(CommandHandler("addpoints", add_points))
+dispatcher.add_handler(CallbackQueryHandler(button_callback))
+dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_referral))
 
-    # Telegram Bot चलाओ
-    TOKEN = os.getenv("BOT_TOKEN")  # बेहतर तरीका: टोकन env से लो
-    updater = Updater(TOKEN)  
-    updater.bot.delete_webhook()  # --- यहीं पर Webhook हटा दिया ---
-    dp = updater.dispatcher
-
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(CallbackQueryHandler(button_callback))
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_referral))
-    dp.add_handler(CommandHandler("addpoints", add_points))
-
-    updater.start_polling()
-    updater.idle()
-
+# --- Set Webhook ---
 if __name__ == '__main__':
-    main()
+    WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # जैसे: https://your-app.onrender.com
+    bot.delete_webhook()
+    bot.set_webhook(f"https://refer-earn-bot.onrender.com/6104357336:AAFeiVvnB7Cg8dJH6tFTEGqyWVDT2UlXHsw")
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
